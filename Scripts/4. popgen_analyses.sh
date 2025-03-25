@@ -83,7 +83,7 @@ pixy --stats dxy \
 # Variables for MSMC prep
 $SAMPLE                          # Sample identifier
 $CHR                             # Chromosome identifier (e.g., "NC_051861.1")
-BAM=/path/to/$SAMPLE.bam               # Aligned BAM file for the sample
+BAM=/path/to/$SAMPLE.bam               # BAM file for the sample
 PHASED_GENOME=/path/to/good_biallelic_snps.rm.bcf_combined.accessible.phased.bcf  # Input phased VCF file
 REGION_TO_INCLUDE_perCHR_BED=/path/to/PipPop.accessible_sites.bed  # Accessible regions BED file
 REF=/path/to/reference.fasta           # Reference genome file
