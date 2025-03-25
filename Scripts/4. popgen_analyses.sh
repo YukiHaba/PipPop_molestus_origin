@@ -8,7 +8,7 @@ conda activate pcangsd
 
 # Run PCAngsd with SNP loadings and site information saved
 pcangsd \
-    --beagle good_biallelic_snps.rm.bcf_combined.accessible.LDpruned.beagle.gz \
+    --beagle $BEAGLE \  # e.g. good_biallelic_snps.rm.bcf_combined.accessible.LDpruned.beagle.gz
     --threads 5 \
     --minMaf 0.05 \
     --snp_weights \
