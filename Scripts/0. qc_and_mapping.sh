@@ -17,7 +17,7 @@ ADAPTER_SEQ_FILE="/path/to/Trimmomatic/adapters/NexteraPE-PE.fa"
 # Output: paired and unpaired files for both forward and reverse reads.
 java -jar /path/to/trimmomatic.jar \
     PE -threads 5 \
-    ${SAMPLE_NAME}_R1.fastq.gz \           # Input FASTQ for read 1 (replace naming convention as needed)
+    ${SAMPLE_NAME}_R1.fastq.gz \           # Input FASTQ for read 1
     ${SAMPLE_NAME}_R2.fastq.gz \           # Input FASTQ for read 2
     ${SAMPLE_NAME}_forward_paired.fq.gz \  # Output: forward paired reads
     ${SAMPLE_NAME}_forward_unpaired.fq.gz \# Output: forward unpaired reads
@@ -35,19 +35,16 @@ fastqc *.fq.gz -t 2 -o FastQCfiles
 ##############################
 ## 3. Read Alignment (BWA-MEM)
 ##############################
-# Define folder containing input FASTQ files and/or output BAM files.
-DATA_FOLDER="/path/to/data_folder"
-
 # Specify the reference genome file.
-REFERENCE="/path/to/reference_genome.fna"
+REFERENCE="/path/to/GCF_015732765.1_VPISU_Cqui_1.0_pri_paternal_genomic.fna" # CpipJ5 assembly (NCBI RefSeq assembly: GCF_015732765.1)
 
 sbatch -J "bwa.mem ${SAMPLE_NAME}" \
 	/path/to/bwa_mem_batch_script.sh \
 	${SAMPLE_NAME} \
-	${DATA_FOLDER}/${SAMPLE_NAME}_forward_paired.fq.gz \    # Forward paired reads
-	${DATA_FOLDER}/${SAMPLE_NAME}_reverse_paired.fq.gz \    # Reverse paired reads
-	${DATA_FOLDER}/${SAMPLE_NAME}_forward_unpaired.fq.gz \  # Forward unpaired reads
-	${DATA_FOLDER}/${SAMPLE_NAME}_reverse_unpaired.fq.gz \  # Reverse unpaired reads
+    ${SAMPLE_NAME}_forward_paired.fq.gz \    # Forward paired reads
+	${SAMPLE_NAME}_reverse_paired.fq.gz \    # Reverse paired reads
+	${SAMPLE_NAME}_forward_unpaired.fq.gz \  # Forward unpaired reads
+	${SAMPLE_NAME}_reverse_unpaired.fq.gz \  # Reverse unpaired reads
 	${REFERENCE}                                          # Reference genome
 
 ##############################
@@ -60,22 +57,19 @@ mkdir -p MarkDupMetricsFile
 java -jar /path/to/picard.jar \
     MarkDuplicates \
     I=${SAMPLE_NAME}.sorted.bam \                      # Input sorted BAM file (assumes prior sorting)
-    O=/tmp/${SAMPLE_NAME}.sorted.markdup.bam \         # Output BAM with duplicates marked
-    M=/tmp/${SAMPLE_NAME}.sorted.markdup.metrics.txt   # Metrics file for duplicate marking
+    O=${SAMPLE_NAME}.sorted.markdup.bam \         # Output BAM with duplicates marked
+    M=${SAMPLE_NAME}.sorted.markdup.metrics.txt   # Metrics file for duplicate marking
 
 # Index the duplicate-marked BAM file for downstream analyses.
-samtools index /tmp/${SAMPLE_NAME}.sorted.markdup.bam
+samtools index ${SAMPLE_NAME}.sorted.markdup.bam
 
 # Optionally, generate mapping statistics using samtools flagstat.
 mkdir -p FlagstatFile
-samtools flagstat /tmp/${SAMPLE_NAME}.sorted.markdup.bam > /tmp/${SAMPLE_NAME}.sorted.markdup.bam.flagstat
+samtools flagstat ${SAMPLE_NAME}.sorted.markdup.bam > ${SAMPLE_NAME}.sorted.markdup.bam.flagstat
 
 ##############################
 ## 5. Indel Realignment (GATK)
 ##############################
-# Define the input BAM file variable for this sample.
-SAMPLE_BAM=${SAMPLE_NAME}.sorted  # Adjust naming if needed
-
 # Step 5a: Identify target intervals for indel realignment.
 java -Xmx20g -jar /path/to/GenomeAnalysisTK.jar \
     -nt 1 \

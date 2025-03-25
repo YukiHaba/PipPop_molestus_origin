@@ -6,21 +6,14 @@
 # Load Python environment for PCANGSD
 conda activate pcangsd
 
-# Variables
-$GZBEAGLE_FILE_PATH                   # Input gzipped Beagle file
-HEADER=$(basename ${GZBEAGLE_FILE_PATH} .beagle.gz)
-
-# Create output directory
-mkdir -p ${HEADER}
-
 # Run PCAngsd with SNP loadings and site information saved
 pcangsd \
-    --beagle ${GZBEAGLE_FILE_PATH} \
+    --beagle good_biallelic_snps.rm.bcf_combined.accessible.LDpruned.beagle.gz \
     --threads 5 \
     --minMaf 0.05 \
     --snp_weights \
     --sites_save \
-    -o /tmp/${HEADER}
+    -o ${HEADER}
 
 ##############################
 # f3
@@ -28,53 +21,43 @@ pcangsd \
 # Load Python environment for Treemix
 conda activate treemix
 
-# Variables
-$TREEMIXGZ_FILE                   # Input gzipped file for Treemix analysis
-$HEADER                           # Header for output files
+HEADER=good_biallelic_snps.rm.bcf_combined.accessible.LDpruned
+
+# get treemix file
+populations -V $HEADER.vcf.gz \
+-M populations.list \
+-t 20 --treemix --no-hap-exports \
+-O .
 
 # Run three-population test with a block size of 500 SNPs
-threepop -i ${TREEMIXGZ_FILE} \
+threepop -i $HEADER.treemix.gz \
     -k 500 \
-    > /tmp/${HEADER}.threepop.out
-
-# Convert output to a tab-delimited file for further analysis
-cat /tmp/${HEADER}.threepop.out | \
-grep ";" | awk -v OFS="\t" '$1=$1' | \
-awk -F '[;,]' '{print $1,$2,$3}' OFS='\t' \
-> /tmp/${HEADER}.threepop.txt
+    > ${HEADER}.threepop.out
 
 ##############################
 # f4/D and Fbranch
 ##############################
-# Compute f4 and Fbranch statistics using VCF input
-
-# Variables for DtriosParallel and Dsuite
-$TREE_FILE      # Phylogenetic tree file
-$NTHREAD        # Number of threads to use
-$POPFILE        # Population assignment file
-$INPUT_VCF      # Input VCF file for analysis
-
 # Run DtriosParallel with the intermediate files preserved
 DtriosParallel \
-    -t ${TREE_FILE} \
     --keep-intermediate \
-    --cores ${NTHREAD} \
-    ${POPFILE} \
-    ${INPUT_VCF}
+    -t population_tree.nwk \
+    --cores 20 \
+    population.list \
+    good_biallelic_snps.rm.bcf_combined.accessible.LDpruned.vcf.gz
 
 # Rename temporary output files (remove unwanted string from filenames)
 rename _tmp.popset_file "" /tmp/DTparallel_*
 
 # Run Fbranch analysis using Dsuite with the combined tree file
 Dsuite Fbranch \
-    ${TREE_FILE} \
+    population_tree.nwk \
     /tmp/DTparallel_combined_tree.txt \
     > /tmp/Fbranch.DTparallel_combined_tree.txt
 
-# Process Fbranch results for visualization using dtools.py
+# Process Fbranch results for visualization
 python3 /path/to/Dsuite/utils/dtools.py \
-    /tmp/Fbranch.DTparallel_combined_tree.txt \
-    ${TREE_FILE} \
+    Fbranch.DTparallel_combined_tree.txt \
+    population_tree.nwk \
     --ladderize \
     --color-cutoff 0.5 \
     --tree-label-size 3 \
@@ -86,39 +69,29 @@ python3 /path/to/Dsuite/utils/dtools.py \
 # Load Python environment for pixy
 conda activate pixy
 
-# Variables
-VARIANT_FOLDER=/path/to/variant_folder
-$REGION                  # Genomic region (e.g., "chr1:1-1000000")
-$SUBSET_NAME             # Identifier for the population subset, if any
-
-# Construct the VCF filename based on the region (adjust naming as needed)
-VCF=${VARIANT_FOLDER}/freeze3.$(echo ${REGION} | sed 's/:/-/g').repeatmasked.singlecopy.concat_INVARIANT_biallelic_snps.GQ20.MQ50.MEAN_DEPTH_10_30X.10perMISS.vcf.gz
-
-# Run pixy to calculate dxy statistics
+# Run pixy to calculate dxy statistics. NOTE: use allsite bcf that contains invariant sites
 pixy --stats dxy \
-    --vcf ${VCF} \
-    --populations popfile.${SUBSET_NAME} \
-    --n_cores 1 \
-    --bed_file /tmp/$(echo ${REGION} | sed 's/:/-/g').bed \
-    --output_folder /tmp \
-    --output_prefix ${SUBSET_NAME}.$(echo ${REGION} | sed 's/:/-/g') &
+    --vcf PipPop.allsites.accessible.bcf \
+    --populations population.list \
+    --n_cores 20 \
+    --output_folder . 
 
 ################################################################################
 # MSMC 
 ################################################################################
 ### MSMC Prep
 # Variables for MSMC prep
-SAMPLE=${9}                           # Sample identifier
-CHR=${10}                             # Chromosome identifier (e.g., "1")
-BAM=/path/to/sample.bam               # Aligned BAM file for the sample
-PHASED_GENOME=/path/to/phased_genome.vcf.gz  # Input phased VCF file
-REGION_TO_INCLUDE_perCHR_BED=/path/to/accessible_regions.chr${CHR}.bed  # Accessible regions BED file
+$SAMPLE                          # Sample identifier
+$CHR                             # Chromosome identifier (e.g., "NC_051861.1")
+BAM=/path/to/$SAMPLE.bam               # Aligned BAM file for the sample
+PHASED_GENOME=/path/to/good_biallelic_snps.rm.bcf_combined.accessible.phased.bcf  # Input phased VCF file
+REGION_TO_INCLUDE_perCHR_BED=/path/to/PipPop.accessible_sites.bed  # Accessible regions BED file
 REF=/path/to/reference.fasta           # Reference genome file
 
 # Calculate mean depth over the included regions
 DEPTH=$(samtools depth -b ${REGION_TO_INCLUDE_perCHR_BED} ${BAM} | awk '{sum += $3} END {print sum / NR}')
 
-# Create a phased VCF file for the sample and chromosome
+# Create a phased VCF file for a given sample and chromosome
 bcftools view -Oz -s ${SAMPLE} ${PHASED_GENOME} \
     > /tmp/${SAMPLE}.chr${CHR}.phased.vcf.gz
 
@@ -204,7 +177,7 @@ msmc2 -t 8 -s -I 0-4,0-5,0-6,0-7,1-4,1-5,1-6,1-7,2-4,2-5,2-6,2-7,3-4,3-5,3-6,3-7
     ${RUN_NAME}/cross.final.txt ${RUN_NAME}/${POP1}.final.txt ${RUN_NAME}/${POP2}.final.txt \
     > ${RUN_NAME}/${RUN_NAME}.combined.final.txt
 
-## (Optional) Bootstrapping: Create bootstrapped multihetsep files
+## Bootstrapping: Create bootstrapped multihetsep files, which one can run msmc2 on
 # /path/to/msmc-tools/multihetsep_bootstrap.py \
 #     -n ${N_boot} \
 #     -s 10000000 \

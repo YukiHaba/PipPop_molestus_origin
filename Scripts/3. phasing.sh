@@ -5,10 +5,10 @@
 ##############################
 
 ### Variables (Update these or pass as arguments)
-VARIANTS=$1        # Input filtered biallelic variant file (VCF/BCF)
-CHR=$2             # Chromosome or region identifier (e.g., "chr1")
-SAMPLE_ID=$3       # Sample identifier
-SAMPLE_BAM=$4      # Sample BAM file containing aligned reads
+VARIANTS=good_biallelic_snps.rm.bcf_combined.accessible.vcf.gz        # Input filtered biallelic variant file (VCF/BCF) 
+$CHR            # Chromosome or region identifier (e.g., "NC_051861.1")
+$SAMPLE_ID      # Sample identifier
+$SAMPLE_BAM     # Sample BAM file PATH
 
 ### 1. Extract and Filter Sample-Specific Variants
 date
@@ -57,8 +57,6 @@ date
 
 ### 5. Compute Phasing Statistics with Whatshap
 # Load Python environment for Whatshap
-module load anaconda3/2021.11
-source /usr/licensed/anaconda3/2021.11/etc/profile.d/conda.sh
 conda activate whatshap
 
 echo "Computing Whatshap statistics..."
@@ -80,18 +78,16 @@ GENETICMAP=$3                  # Path to the genetic map file
 VARIANTS_BCF_HEADER=$(basename ${PREPHASED_VARIANTS_BCF} .prephased.bcf)
 
 # Load Python environment for SHAPEIT4
-module load anaconda3/2021.11
-source /usr/licensed/anaconda3/2021.11/etc/profile.d/conda.sh
 conda activate shapeit4
 
 echo "Running SHAPEIT4 for final phasing..."
 shapeit4 \
-    --input ${PREPHASED_VARIANTS_BCF} \
+    --input ${PREPHASED_VARIANTS_BCF}.${CHR}.prephased.bcf \
     --sequencing \                           # Specify that the data is sequencing-based (not SNP array)
     --use-PS 0.0001 \                        # Expected error rate in phase sets; adjust if needed.
     --effective-size 100000 \                # Effective population size (adjust based on study)
-    --region ${CHR} \                        # Target region or chromosome
-    --map ${GENETICMAP} \                    # Genetic map file for recombination rates
+    --region ${CHR} \                        # Target chromosome
+    --map ${GENETICMAP} \                    # Genetic map file for recombination rates. Use Hickner et al 2019 PMID: 30668763
     --thread 10 \                            # Number of threads for computation
     --mcmc-iterations 10b,1p,1b,1p,1b,1p,1b,1p,10m \  # Custom MCMC iterations; modify as needed.
     --pbwt-depth 8 \                         # PBWT depth parameter; adjust if necessary.
