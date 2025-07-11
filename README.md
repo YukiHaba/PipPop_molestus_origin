@@ -2,7 +2,7 @@ This repository contains the computational pipeline and reference data associate
 
 <img src="images/Cpip_Complex_F.LawrenceEReeves.jpg" alt="mosquito image by Lawrence E. Reeves" width="500">
 
-## Repository Structure
+## Structure
 
 ```
 ├── README.md                    # This file
@@ -23,7 +23,7 @@ This repository contains the computational pipeline and reference data associate
     └── Cpip_Complex_F.LawrenceEReeves.jpg
 ```
 
-## Data Access
+## Data
 
 ### Raw Sequencing Data
 - **NCBI BioProject**: [PRJNA1209100](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1209100)
@@ -38,7 +38,7 @@ This repository contains the computational pipeline and reference data associate
   - Repeat regions: `GCF_015732765.1_VPISU_Cqui_1.0_pri_paternal_rm.out.gz`
   - Accessible sites: `PipPop.accessible_sites.bed`
 
-## Analysis Pipeline
+## Pipeline
 
 The analysis consists of 5 sequential scripts that process raw sequencing data through to population genomic analyses:
 
