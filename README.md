@@ -71,7 +71,7 @@ The analysis consists of 5 sequential scripts that process raw sequencing data t
    - Nucleotide diversity analysis (pixy)
    - Demographic history inference (MSMC2)
 
-## Getting Started
+## Workflow
 
 1. **Download raw data**: Access FASTQ files from NCBI project PRJNA1209100
 2. **Clone this repository**: `git clone [repository-url]`
