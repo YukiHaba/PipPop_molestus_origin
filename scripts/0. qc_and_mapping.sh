@@ -1,96 +1,183 @@
 #!/bin/bash
 
-##############################
-## 0. Quality Control (FastQC)
-##############################
-# Run FastQC on all paired-end FASTQ files to assess initial read quality.
-fastqc *.fq.gz -t 2 -o FastQCfiles 
+################################################################################
+# SCRIPT: 0. Quality Control and Read Mapping Pipeline
+# AUTHOR: Yuki Haba
+# REFERENCE: Yuki Haba et al. 2025 Ancient origin of an urban underground 
+#            mosquito (PMID: 39975080)
+# DESCRIPTION: Pipeline for NGS data quality control, trimming,
+#              alignment, duplicate marking, indel realignment, and coverage
+#              calculation. Designed for paired-end Illumina sequencing data.
+################################################################################
 
-##############################
-## 1. Read Trimming (Trimmomatic)
-##############################
-# Define the adapter sequence file (e.g., Nextera adapters).
-ADAPTER_SEQ_FILE="/path/to/Trimmomatic/adapters/NexteraPE-PE.fa"
+# Exit on any error
+set -e
 
-# Run Trimmomatic in paired-end mode with 5 threads.
-# Input: raw FASTQ files for read 1 and read 2.
-# Output: paired and unpaired files for both forward and reverse reads.
-java -jar /path/to/trimmomatic.jar \
-    PE -threads 5 \
-    ${SAMPLE_NAME}_R1.fastq.gz \           # Input FASTQ for read 1
-    ${SAMPLE_NAME}_R2.fastq.gz \           # Input FASTQ for read 2
-    ${SAMPLE_NAME}_forward_paired.fq.gz \  # Output: forward paired reads
-    ${SAMPLE_NAME}_forward_unpaired.fq.gz \# Output: forward unpaired reads
-    ${SAMPLE_NAME}_reverse_paired.fq.gz \  # Output: reverse paired reads
-    ${SAMPLE_NAME}_reverse_unpaired.fq.gz \# Output: reverse unpaired reads
-    ILLUMINACLIP:${ADAPTER_SEQ_FILE}:2:30:10 \  # Adapter clipping with specified parameters
-    MINLEN:36                             # Discard reads shorter than 36 bases
+#===============================================================================
+# CONFIGURATION VARIABLES - MODIFY THESE PATHS FOR YOUR SYSTEM
+#===============================================================================
 
-##############################
-## 2. Post-Trimming Quality Control (FastQC)
-##############################
-# Re-run FastQC on trimmed paired files to check quality improvements.
-fastqc *.fq.gz -t 2 -o FastQCfiles
+# Sample information (required variables)
+SAMPLE_NAME="${SAMPLE_NAME:-sample_name}"  # Sample identifier
+THREADS="${THREADS:-8}"                    # Number of threads to use
 
-##############################
-## 3. Read Alignment (BWA-MEM)
-##############################
-# Specify the reference genome file.
-REFERENCE="/path/to/GCF_015732765.1_VPISU_Cqui_1.0_pri_paternal_genomic.fna" # CpipJ5 assembly (NCBI RefSeq assembly: GCF_015732765.1)
+# Tool paths (update these to match your system)
+TRIMMOMATIC_JAR="${TRIMMOMATIC_JAR:-/path/to/trimmomatic.jar}"
+PICARD_JAR="${PICARD_JAR:-/path/to/picard.jar}"
+GATK_JAR="${GATK_JAR:-/path/to/GenomeAnalysisTK.jar}"
 
-sbatch -J "bwa.mem ${SAMPLE_NAME}" \
-	/path/to/bwa_mem_batch_script.sh \
-	${SAMPLE_NAME} \
-    ${SAMPLE_NAME}_forward_paired.fq.gz \    # Forward paired reads
-	${SAMPLE_NAME}_reverse_paired.fq.gz \    # Reverse paired reads
-	${SAMPLE_NAME}_forward_unpaired.fq.gz \  # Forward unpaired reads
-	${SAMPLE_NAME}_reverse_unpaired.fq.gz \  # Reverse unpaired reads
-	${REFERENCE}                                          # Reference genome
+# Reference genome and adapter files
+REFERENCE_GENOME="${REFERENCE_GENOME:-GCF_015732765.1_VPISU_Cqui_1.0_pri_paternal_genomic.fna}" # CpipJ5 assembly (NCBI RefSeq assembly: GCF_015732765.1)
+ADAPTER_FILE="${ADAPTER_FILE:-/path/to/adapters/NexteraPE-PE.fa}"
 
-##############################
-## 4. Marking Duplicates (Picard)
-##############################
-# Create directory to store duplication metrics.
-mkdir -p MarkDupMetricsFile
+# Input/Output directories
+INPUT_DIR="${INPUT_DIR:-./raw_data}"                     # Raw FASTQ files (available from NCBI project PRJNA1209100)
+OUTPUT_DIR="${OUTPUT_DIR:-./processed_data}"
+QC_DIR="${QC_DIR:-./qc_reports}"
+TEMP_DIR="${TEMP_DIR:-./tmp}"
 
-# Run Picard MarkDuplicates on the sorted BAM file.
-java -jar /path/to/picard.jar \
-    MarkDuplicates \
-    I=${SAMPLE_NAME}.sorted.bam \                      # Input sorted BAM file (assumes prior sorting)
-    O=${SAMPLE_NAME}.sorted.markdup.bam \         # Output BAM with duplicates marked
-    M=${SAMPLE_NAME}.sorted.markdup.metrics.txt   # Metrics file for duplicate marking
+# Create output directories
+mkdir -p "${OUTPUT_DIR}" "${QC_DIR}" "${TEMP_DIR}"
 
-# Index the duplicate-marked BAM file for downstream analyses.
-samtools index ${SAMPLE_NAME}.sorted.markdup.bam
+#===============================================================================
+# STEP 1: INITIAL QUALITY CONTROL
+#===============================================================================
 
-# Optionally, generate mapping statistics using samtools flagstat.
-mkdir -p FlagstatFile
-samtools flagstat ${SAMPLE_NAME}.sorted.markdup.bam > ${SAMPLE_NAME}.sorted.markdup.bam.flagstat
+# Run FastQC on raw paired-end FASTQ files to assess initial read quality
+fastqc "${INPUT_DIR}"/*.fq.gz \
+    --threads "${THREADS}" \
+    --outdir "${QC_DIR}" \
+    --extract
 
-##############################
-## 5. Indel Realignment (GATK)
-##############################
-# Step 5a: Identify target intervals for indel realignment.
-java -Xmx20g -jar /path/to/GenomeAnalysisTK.jar \
-    -nt 1 \
+#===============================================================================
+# STEP 2: READ TRIMMING AND ADAPTER REMOVAL
+#===============================================================================
+
+# Trimmomatic parameters:
+# - PE: Paired-end mode
+# - ILLUMINACLIP: Remove adapters (seedMismatches:palindromeClipThreshold:simpleClipThreshold)
+# - SLIDINGWINDOW: Sliding window trimming (windowSize:requiredQuality)
+# - LEADING/TRAILING: Cut bases with quality below threshold from start/end
+# - MINLEN: Drop reads shorter than specified length
+
+java -jar "${TRIMMOMATIC_JAR}" PE \
+    -threads "${THREADS}" \
+    "${INPUT_DIR}/${SAMPLE_NAME}_R1.fastq.gz" \
+    "${INPUT_DIR}/${SAMPLE_NAME}_R2.fastq.gz" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}_forward_paired.fq.gz" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}_forward_unpaired.fq.gz" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}_reverse_paired.fq.gz" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}_reverse_unpaired.fq.gz" \
+    ILLUMINACLIP:"${ADAPTER_FILE}":2:30:10 \
+    LEADING:3 \
+    TRAILING:3 \
+    SLIDINGWINDOW:4:15 \
+    MINLEN:36
+
+#===============================================================================
+# STEP 3: POST-TRIMMING QUALITY CONTROL
+#===============================================================================
+
+# Run FastQC on trimmed files to assess quality improvements
+fastqc "${OUTPUT_DIR}"/*_paired.fq.gz \
+    --threads "${THREADS}" \
+    --outdir "${QC_DIR}" \
+    --extract
+
+#===============================================================================
+# STEP 4: READ ALIGNMENT
+#===============================================================================
+
+# BWA-MEM alignment parameters:
+# -t: Number of threads
+# -M: Mark shorter split hits as secondary (for Picard compatibility)
+# -R: Read group header line
+
+READ_GROUP="@RG\tID:${SAMPLE_NAME}\tSM:${SAMPLE_NAME}\tPL:ILLUMINA\tLB:${SAMPLE_NAME}_lib"
+
+# Align paired reads to reference genome
+bwa mem -t "${THREADS}" -M -R "${READ_GROUP}" \
+    "${REFERENCE_GENOME}" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}_forward_paired.fq.gz" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}_reverse_paired.fq.gz" | \
+    samtools view -@ "${THREADS}" -bS - | \
+    samtools sort -@ "${THREADS}" -o "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.bam" -
+
+# Index the sorted BAM file
+samtools index "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.bam"
+
+#===============================================================================
+# STEP 5: DUPLICATE MARKING
+#===============================================================================
+
+# Create directory for duplicate metrics
+mkdir -p "${OUTPUT_DIR}/metrics"
+
+# Mark PCR and optical duplicates
+java -Xmx8g -jar "${PICARD_JAR}" MarkDuplicates \
+    INPUT="${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.bam" \
+    OUTPUT="${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.markdup.bam" \
+    METRICS_FILE="${OUTPUT_DIR}/metrics/${SAMPLE_NAME}.markdup.metrics.txt" \
+    VALIDATION_STRINGENCY=SILENT \
+    CREATE_INDEX=true \
+    REMOVE_DUPLICATES=false
+
+# Generate mapping statistics
+samtools flagstat "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.markdup.bam" \
+    > "${OUTPUT_DIR}/metrics/${SAMPLE_NAME}.flagstat.txt"
+
+#===============================================================================
+# STEP 6: INDEL REALIGNMENT (GATK3 - Optional for modern pipelines)
+#===============================================================================
+
+# Step 6a: Identify target intervals for indel realignment
+java -Xmx8g -jar "${GATK_JAR}" \
     -T RealignerTargetCreator \
-    -R ${REFERENCE} \
-    -I ${SAMPLE_BAM}.bam \                 # Input BAM file for the sample
-    -o ${SAMPLE_BAM}.indel.list            # Output list of indel targets
+    -R "${REFERENCE_GENOME}" \
+    -I "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.markdup.bam" \
+    -o "${TEMP_DIR}/${SAMPLE_NAME}.indel.intervals" \
+    -nt 1
 
-# Step 5b: Perform local realignment around the identified indels.
-java -Xmx20g -jar /path/to/GenomeAnalysisTK.jar \
+# Step 6b: Perform local realignment around indels
+java -Xmx8g -jar "${GATK_JAR}" \
     -T IndelRealigner \
-    -R ${REFERENCE} \
-    -I ${SAMPLE_BAM}.bam \                 # Same input BAM file
-    -targetIntervals ${SAMPLE_BAM}.indel.list \  # Use the indel intervals from previous step
-    -o ${SAMPLE_BAM}.realigned.bam         # Output realigned BAM file
+    -R "${REFERENCE_GENOME}" \
+    -I "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.markdup.bam" \
+    -targetIntervals "${TEMP_DIR}/${SAMPLE_NAME}.indel.intervals" \
+    -o "${OUTPUT_DIR}/${SAMPLE_NAME}.realigned.bam"
 
-##############################
-## 6. Coverage Calculation (mosdepth)
-##############################
-# Compute coverage statistics from the final realigned BAM file.
+# Index the realigned BAM file
+samtools index "${OUTPUT_DIR}/${SAMPLE_NAME}.realigned.bam"
+
+#===============================================================================
+# STEP 7: COVERAGE CALCULATION
+#===============================================================================
+
+# Create output directory for coverage files
+mkdir -p "${OUTPUT_DIR}/coverage"
+
+# Calculate coverage statistics from the final processed BAM file
 mosdepth \
-    /tmp/${SAMPLE_NAME} \                    # Prefix for mosdepth output files
-    ${SAMPLE_BAM}.realigned.bam \            # Input BAM file (post realignment)
-    --d4                                     # Option for per-base depth (adjust options as needed)
+    --threads "${THREADS}" \
+    --by 1000 \
+    "${OUTPUT_DIR}/coverage/${SAMPLE_NAME}" \
+    "${OUTPUT_DIR}/${SAMPLE_NAME}.realigned.bam"
+
+#===============================================================================
+# CLEANUP (OPTIONAL)
+#===============================================================================
+
+# Optional: Clean up intermediate files to save disk space
+# Uncomment the lines below if you want to remove intermediate files
+# rm -f "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.bam"
+# rm -f "${OUTPUT_DIR}/${SAMPLE_NAME}.sorted.markdup.bam"
+# rm -rf "${TEMP_DIR}"
+
+#===============================================================================
+# PIPELINE COMPLETION SUMMARY
+#===============================================================================
+
+# Final processed file: ${OUTPUT_DIR}/${SAMPLE_NAME}.realigned.bam
+# Quality reports: ${QC_DIR}/
+# Metrics: ${OUTPUT_DIR}/metrics/
+# Coverage: ${OUTPUT_DIR}/coverage/

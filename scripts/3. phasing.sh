@@ -1,98 +1,178 @@
 #!/bin/bash
 
-##############################
-### PART 1: Prephase Variants
-##############################
+################################################################################
+# SCRIPT: 3. Haplotype Phasing Pipeline
+# AUTHOR: Yuki Haba
+# REFERENCE: Yuki Haba et al. 2025 Ancient origin of an urban underground 
+#            mosquito (PMID: 39975080)
+# DESCRIPTION: Two-stage haplotype phasing pipeline using HAPCUT2 for initial
+#              prephasing followed by statistical phasing. 
+#              Includes quality filtering and phasing statistics.
+################################################################################
 
-### Variables (Update these or pass as arguments)
-VARIANTS=good_biallelic_snps.rm.bcf_combined.accessible.vcf.gz        # Input filtered biallelic variant file (VCF/BCF) 
-$CHR            # Chromosome or region identifier (e.g., "NC_051861.1")
-$SAMPLE_ID      # Sample identifier
-$SAMPLE_BAM     # Sample BAM file PATH
+# Exit on any error
+set -e
 
-### 1. Extract and Filter Sample-Specific Variants
-date
-echo "Extracting sample-specific variants for ${SAMPLE_ID} on ${CHR}"
+#===============================================================================
+# CONFIGURATION VARIABLES - MODIFY THESE PATHS FOR YOUR SYSTEM
+#===============================================================================
 
-# Extract variants for the sample and filter for genotype quality (GQ) and depth (DP)
-bcftools view -Ou -s ${SAMPLE_ID} ${VARIANTS} | \
-bcftools filter -S . -Ou -i "FMT/GQ >= 20 & FMT/DP >= 8" \
-    -Ou -o /tmp/${SAMPLE_ID}.${CHR}.bcf
+# Input files
+VARIANTS="${VARIANTS:-good_biallelic_snps.rm.combined.accessible.vcf.gz}" # Filtered biallelic variant file from script 1
+SAMPLE_ID="${SAMPLE_ID:-sample_name}"                                     # Sample identifier
+SAMPLE_BAM="${SAMPLE_BAM:-/path/to/sample.bam}"                          # Sample BAM file from script 0
+CHR="${CHR:-chr1}"                                                        # Chromosome/region identifier
 
-# Separate heterozygous calls from non-heterozygous ones
-echo "Extracting heterozygous variants..."
-bcftools view -Ov -g het /tmp/${SAMPLE_ID}.${CHR}.bcf -o /tmp/${SAMPLE_ID}.${CHR}.hets.vcf
-echo "Extracting non-heterozygous variants..."
-bcftools view -Ob -g ^het /tmp/${SAMPLE_ID}.${CHR}.bcf -o /tmp/${SAMPLE_ID}.${CHR}.nonhets.bcf
+# Phasing parameters
+GENETIC_MAP="${GENETIC_MAP:-/path/to/genetic_map.txt}"       # Genetic map file for recombination rates
 
-echo "Sample-specific VCF extraction for ${SAMPLE_ID} on ${CHR} completed."
-date
+# Tool paths and environments
+WHATSHAP_ENV="${WHATSHAP_ENV:-whatshap}"                     # Conda environment for whatshap
+SHAPEIT4_ENV="${SHAPEIT4_ENV:-shapeit4}"                     # Conda environment for SHAPEIT4
 
-### 2. Extract Informative Reads Using extractHAIRS
-echo "Extracting informative reads from BAM file..."
+# Output directories
+OUTPUT_DIR="${OUTPUT_DIR:-./phasing_output}"
+TEMP_DIR="${TEMP_DIR:-./tmp}"
+STATS_DIR="${STATS_DIR:-./phasing_stats}"
+
+# Create output directories
+mkdir -p "${OUTPUT_DIR}" "${TEMP_DIR}" "${STATS_DIR}"
+
+#===============================================================================
+# PART 1: VARIANT PREPHASING WITH HAPCUT2
+#===============================================================================
+
+#===============================================================================
+# STEP 1: EXTRACT AND FILTER SAMPLE-SPECIFIC VARIANTS
+#===============================================================================
+
+# Extract variants for the specific sample and apply quality filters
+# Filters: Genotype Quality (GQ) >= 20, Depth (DP) >= 8
+bcftools view \
+    --output-type u \
+    --samples "${SAMPLE_ID}" \
+    "${VARIANTS}" | \
+bcftools filter \
+    --set-GTs . \
+    --output-type u \
+    --include "FMT/GQ >= 20 & FMT/DP >= 8" \
+    --output "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.bcf"
+
+# Separate heterozygous from non-heterozygous variants
+bcftools view \
+    --output-type v \
+    --genotype het \
+    "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.bcf" \
+    --output "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hets.vcf"
+
+bcftools view \
+    --output-type b \
+    --genotype ^het \
+    "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.bcf" \
+    --output "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.nonhets.bcf"
+
+#===============================================================================
+# STEP 2: EXTRACT INFORMATIVE READS
+#===============================================================================
+
+# Extract reads that span multiple heterozygous sites for phasing
 extractHAIRS \
-    --bam ${SAMPLE_BAM} \
-    --VCF /tmp/${SAMPLE_ID}.${CHR}.hets.vcf \
-    --out /tmp/${SAMPLE_ID}.${CHR}.hairs
-date
+    --bam "${SAMPLE_BAM}" \
+    --VCF "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hets.vcf" \
+    --out "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hairs"
 
-### 3. Prephase Heterozygous Variants with HAPCUT2
-echo "Running HAPCUT2 for prephasing heterozygous variants..."
+#===============================================================================
+# STEP 3: PREPHASE HETEROZYGOUS VARIANTS WITH HAPCUT2
+#===============================================================================
+
+# Phase heterozygous variants using read-based information
 HAPCUT2 \
-    --fragments /tmp/${SAMPLE_ID}.${CHR}.hairs \
-    --vcf /tmp/${SAMPLE_ID}.${CHR}.hets.vcf \
-    --out /tmp/${SAMPLE_ID}.${CHR}.hets \
+    --fragments "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hairs" \
+    --vcf "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hets.vcf" \
+    --out "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hets" \
     --outvcf 1
-date
 
-### 4. Concatenate Prephased Hets with Non-Hets
-echo "Merging prephased heterozygous variants with non-heterozygous variants..."
-bcftools concat -Ou /tmp/${SAMPLE_ID}.${CHR}.nonhets.bcf /tmp/${SAMPLE_ID}.${CHR}.hets.phased.VCF | \
-bcftools annotate -Ou -x INFO,^FMT/GT,FMT/PS | \
-bcftools sort -T /tmp/ -Ob -o /tmp/${SAMPLE_ID}.${CHR}.prephased.bcf
+#===============================================================================
+# STEP 4: MERGE PREPHASED AND NON-HETEROZYGOUS VARIANTS
+#===============================================================================
 
-# Index the prephased variant file for downstream use.
-bcftools index /tmp/${SAMPLE_ID}.${CHR}.prephased.bcf
-date
+# Combine prephased heterozygous variants with non-heterozygous variants
+bcftools concat \
+    --output-type u \
+    "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.nonhets.bcf" \
+    "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hets.phased.VCF" | \
+bcftools annotate \
+    --output-type u \
+    --remove INFO,^FMT/GT,FMT/PS | \
+bcftools sort \
+    --temp-dir "${TEMP_DIR}" \
+    --output-type b \
+    --output "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.prephased.bcf"
 
-### 5. Compute Phasing Statistics with Whatshap
-# Load Python environment for Whatshap
-conda activate whatshap
+# Index the prephased variant file
+bcftools index "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.prephased.bcf"
 
-echo "Computing Whatshap statistics..."
-mkdir -p whatshap_stats
-whatshap stats /tmp/${SAMPLE_ID}.${CHR}.prephased.bcf \
-    --tsv /tmp/${SAMPLE_ID}.${CHR}.prephased.whatshap_stats.tsv
+#===============================================================================
+# STEP 5: CALCULATE PHASING STATISTICS
+#===============================================================================
 
-# Move stats to a designated folder.
-mv /tmp/${SAMPLE_ID}.${CHR}.prephased.whatshap_stats.tsv ./whatshap_stats/
+# Activate whatshap environment and compute phasing statistics
+conda activate "${WHATSHAP_ENV}"
 
-################################################################################
-### PART 2: Phasing via SHAPEIT
-################################################################################
+whatshap stats \
+    "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.prephased.bcf" \
+    --tsv "${STATS_DIR}/${SAMPLE_ID}.${CHR}.prephased.whatshap_stats.tsv"
 
-### Variables for SHAPEIT4 (These can be passed as arguments or defined here)
-PREPHASED_VARIANTS_BCF=$1        # Input prephased BCF file (from part 1)
-CHR=$2                         # Chromosome/region (same as before)
-GENETICMAP=$3                  # Path to the genetic map file
-VARIANTS_BCF_HEADER=$(basename ${PREPHASED_VARIANTS_BCF} .prephased.bcf)
+conda deactivate
 
-# Load Python environment for SHAPEIT4
-conda activate shapeit4
+#===============================================================================
+# PART 2: STATISTICAL PHASING WITH SHAPEIT4
+#===============================================================================
 
-echo "Running SHAPEIT4 for final phasing..."
+#===============================================================================
+# STEP 6: FINAL PHASING WITH SHAPEIT4
+#===============================================================================
+
+# Activate SHAPEIT4 environment
+conda activate "${SHAPEIT4_ENV}"
+
+PREPHASED_BCF="${TEMP_DIR}/${SAMPLE_ID}.${CHR}.prephased.bcf"
+VARIANTS_BCF_HEADER=$(basename "${PREPHASED_BCF}" .prephased.bcf)
+
+# Run SHAPEIT4 for final statistical phasing using genetic maps
 shapeit4 \
-    --input ${PREPHASED_VARIANTS_BCF}.${CHR}.prephased.bcf \
-    --sequencing \                           # Specify that the data is sequencing-based (not SNP array)
-    --use-PS 0.0001 \                        # Expected error rate in phase sets; adjust if needed.
-    --effective-size 100000 \                # Effective population size (adjust based on study)
-    --region ${CHR} \                        # Target chromosome
-    --map ${GENETICMAP} \                    # Genetic map file for recombination rates. Use Hickner et al 2019 PMID: 30668763
-    --thread 10 \                            # Number of threads for computation
-    --mcmc-iterations 10b,1p,1b,1p,1b,1p,1b,1p,10m \  # Custom MCMC iterations; modify as needed.
-    --pbwt-depth 8 \                         # PBWT depth parameter; adjust if necessary.
-    --output /tmp/${VARIANTS_BCF_HEADER}.phased.bcf \  # Output file for phased variants.
-    --log ${VARIANTS_BCF_HEADER}.shapeit.log          # Log file for SHAPEIT4 run
+    --input "${PREPHASED_BCF}" \
+    --sequencing \
+    --use-PS 0.0001 \
+    --effective-size 100000 \
+    --region "${CHR}" \
+    --map "${GENETIC_MAP}" \
+    --thread 10 \
+    --mcmc-iterations 10b,1p,1b,1p,1b,1p,1b,1p,10m \
+    --pbwt-depth 8 \
+    --output "${OUTPUT_DIR}/${VARIANTS_BCF_HEADER}.phased.bcf" \
+    --log "${OUTPUT_DIR}/${VARIANTS_BCF_HEADER}.shapeit.log"
 
-# Index the final phased BCF file.
-bcftools index /tmp/${VARIANTS_BCF_HEADER}.phased.bcf
+# Index the final phased BCF file
+bcftools index "${OUTPUT_DIR}/${VARIANTS_BCF_HEADER}.phased.bcf"
+
+conda deactivate
+
+#===============================================================================
+# CLEANUP (OPTIONAL)
+#===============================================================================
+
+# Optional: Clean up intermediate files to save disk space
+# Uncomment the lines below if you want to remove intermediate files
+# rm -f "${TEMP_DIR}/${SAMPLE_ID}.${CHR}".{bcf,hets.vcf,nonhets.bcf,hairs}
+# rm -f "${TEMP_DIR}/${SAMPLE_ID}.${CHR}.hets.phased.VCF"
+
+#===============================================================================
+# PIPELINE COMPLETION SUMMARY
+#===============================================================================
+
+# Final output files:
+# - Prephased variants: ${TEMP_DIR}/${SAMPLE_ID}.${CHR}.prephased.bcf
+# - Final phased variants: ${OUTPUT_DIR}/${SAMPLE_ID}.${CHR}.phased.bcf
+# - Phasing statistics: ${STATS_DIR}/${SAMPLE_ID}.${CHR}.prephased.whatshap_stats.tsv
+# - SHAPEIT4 log: ${OUTPUT_DIR}/${SAMPLE_ID}.${CHR}.shapeit.log
