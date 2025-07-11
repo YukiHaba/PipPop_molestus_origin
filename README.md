@@ -72,3 +72,19 @@ The analysis consists of 5 sequential scripts that process raw sequencing data t
    - Demographic history inference (MSMC2)
 
 For more detailed instructions, see `scripts/README.md`.
+
+## Citation
+
+If you use this pipeline or data, please cite:
+
+Haba et al. (2025) Ancient origin of an urban underground mosquito. PMID: 39975080. https://www.biorxiv.org/content/10.1101/2025.01.26.634793
+
+## Contact
+
+For questions about the analysis pipeline or data, please contact:
+- Yuki Haba: [yhaba@princeton.edu]
+- Lindy McBride: [csm7@princeton.edu]
+
+## License
+
+This project is licensed under the terms of the MIT license. See the [LICENSE](LICENSE) file for details.
