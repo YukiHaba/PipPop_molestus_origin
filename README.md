@@ -72,9 +72,3 @@ The analysis consists of 5 sequential scripts that process raw sequencing data t
    - Demographic history inference (MSMC2)
 
 For more detailed instructions, see `scripts/README.md`.
-
-## Contact
-
-For questions about the analysis pipeline or data, please contact:
-- Yuki Haba: [yhaba@princeton.edu]
-- Lindy McBride: [csm7@princeton.edu]
