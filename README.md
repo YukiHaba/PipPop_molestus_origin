@@ -1,4 +1,4 @@
-This repository contains the computational pipeline and reference data associated with **Haba et al. (2025) Ancient origin of an urban underground mosquito** (PMID: 39975080 DOI: 10.1101/2025.01.26.634793).
+This repository contains the computational pipeline and reference data associated with [Haba et al. _Science_ (2025) Ancient origin of an urban underground mosquito](https://www.science.org/doi/10.1126/science.ady4515)  (PMID: 41129649).
 
 <img src="images/Cpip_Complex_F.LawrenceEReeves.jpg" alt="mosquito image by Lawrence E. Reeves" width="500">
 Culex photo by Lawrence E. Reeve, U of Florida
@@ -78,8 +78,7 @@ For more detailed instructions, see `scripts/README.md`.
 
 If you use this pipeline or data, please cite:
 
-Haba et al. (2025) Ancient origin of an urban underground mosquito. PMID: 39975080. https://www.biorxiv.org/content/10.1101/2025.01.26.634793
-
+[Haba et al. _Science_ (2025) Ancient origin of an urban underground mosquito](https://www.science.org/doi/10.1126/science.ady4515)  (PMID: 41129649)
 ## Contact
 
 For questions about the analysis pipeline or data, please contact:
